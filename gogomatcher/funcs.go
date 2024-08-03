@@ -8,6 +8,12 @@ import (
 	"github.com/google/uuid"
 )
 
+/*	TODO LIST:
+	- Insertions for bid levels work but for ask levels it is janked - I think I may need to go back to the drawing board
+	and change how the levels are structured - but first we need to try to make a somewhat clean solution for the current
+	implementation to see if it is worth switching or not.
+*/
+
 func NewAccount(username string) *Account {
 	account := new(Account)
 	account.uid = uuid.New()
@@ -133,34 +139,39 @@ func MatchOrder(exchange *Exchange, order *Order) (bool, error) {
 	switch order.side {
 	case Bid:
 		levelsToSearch = &orderbook.bids
+		limitCheck = bidLimitCheck
 	case Ask:
 		levelsToSearch = &orderbook.asks
-		limitCheck = bidLimitCheck
+		limitCheck = askLimitCheck
 	default:
 		return false, errors.New("not a valid order side")
 	}
 
 	toInsertAt := 0
+	found := false;
+	currIdx := 0;
 
 	// search for level to insert order into if not (fully) matched
 	for idx, level := range *levelsToSearch {
+		currIdx++;
 		if level.price == order.price {
 			(*levelsToSearch)[idx].orders = append((*levelsToSearch)[idx].orders, order)
 			return true, nil
 		} else if !limitCheck(level.price, order.price) {
-			toInsertAt = idx - 1
-			break
+            if idx > 1 {
+                toInsertAt = idx - 1
+				found = true;
+            } 
+            break
 		}
 	}
 
-	switch order.side {
-	case Bid:
-		levelsToSearch = &orderbook.bids
-	case Ask:
-		levelsToSearch = &orderbook.asks
-		limitCheck = bidLimitCheck
-	default:
-		return false, errors.New("not a valid order side")
+	// we have to append the level to the slice of the slice
+	if len(*levelsToSearch) > 0 && !found && currIdx == len(*levelsToSearch){
+		newLevel := NewLevel(order.price)
+		newLevel.orders = append(newLevel.orders, order)
+		*levelsToSearch = append(*levelsToSearch, *newLevel)
+		return true, nil
 	}
 
 	// appropriate price level does not exist, so we have to create it and then insert the order into it
